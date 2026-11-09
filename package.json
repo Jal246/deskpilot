@@ -1,0 +1,26 @@
+{
+  "name": "deskpilot",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down",
+    "db:generate": "pnpm --filter @deskpilot/db generate",
+    "db:migrate": "pnpm --filter @deskpilot/db migrate",
+    "db:seed": "pnpm --filter @deskpilot/db seed",
+    "db:studio": "pnpm --filter @deskpilot/db studio",
+    "db:setup": "pnpm db:up && pnpm db:migrate && pnpm db:seed",
+    "test": "turbo run test"
+  },
+  "devDependencies": {
+    "turbo": "^2.11.10",
+    "typescript": "^5.9.3"
+  }
+}
