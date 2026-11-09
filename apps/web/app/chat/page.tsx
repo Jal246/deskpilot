@@ -1,36 +1,45 @@
 import { Suspense } from "react";
-import { Card, Loading } from "@/components/ui";
+import Link from "next/link";
+import { Loading } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { logout } from "../login/actions";
+import { Chat } from "./chat";
 
-// Employee help desk. The real chat arrives in step 7.
+// Employee help desk chat. Admins can use it too, to try the agent.
 export default function ChatPage() {
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 py-10">
+    <main className="mx-auto flex min-h-screen w-full max-w-2xl flex-1 flex-col gap-6 px-4 pt-10">
       <Suspense fallback={<Loading />}>
-        <ChatPlaceholder />
+        <ChatShell />
       </Suspense>
     </main>
   );
 }
 
-async function ChatPlaceholder() {
+async function ChatShell() {
   const user = await requireUser();
+  const isStaff = user.role !== "employee";
   return (
     <>
       <header className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">IT Help Desk</h1>
-          <p className="text-sm text-zinc-500">Hi {user.name.split(" ")[0]}, what can we help with?</p>
+          <p className="text-sm text-zinc-500">
+            Signed in as {user.name} ({user.email})
+          </p>
         </div>
-        <form action={logout}>
-          <button className="text-sm text-zinc-500 hover:underline">Sign out</button>
-        </form>
+        <div className="flex items-center gap-4 text-sm text-zinc-500">
+          {isStaff && (
+            <Link href="/workflows" className="hover:underline">
+              Dashboard
+            </Link>
+          )}
+          <form action={logout}>
+            <button className="hover:underline">Sign out</button>
+          </form>
+        </div>
       </header>
-      <Card className="p-6 text-sm text-zinc-500">
-        The help desk chat arrives in step 7. You&apos;ll be able to say things like &quot;I&apos;m locked out&quot; or
-        &quot;add me to the design group&quot;, and Deskpilot will run a published workflow or open a ticket.
-      </Card>
+      <Chat firstName={user.name.split(" ")[0] || user.name} isStaff={isStaff} />
     </>
   );
 }

@@ -27,10 +27,34 @@ export type GenerateWorkflowRequest = {
   currentCode?: string;
 };
 
+// ---------- help desk agent: chat with tools ----------
+
+/** A tool the agent may call. `inputSchema` is JSON Schema (type "object"). */
+export type ToolDef = { name: string; description: string; inputSchema: Record<string, unknown> };
+
+export type ToolCall = { id: string; name: string; input: Record<string, unknown> };
+
+export type ChatMessage =
+  | { role: "user"; content: string }
+  | { role: "assistant"; content: string; toolCalls?: ToolCall[] }
+  /** The result of one tool call, as JSON text. */
+  | { role: "tool"; toolCallId: string; name: string; content: string };
+
+export type ChatRequest = {
+  system: string;
+  /** Who is asking. Real providers get this through `system`; the mock reads it here. */
+  user: { name: string; email: string };
+  messages: ChatMessage[];
+  tools: ToolDef[];
+};
+
+/** Either a final answer (no tool calls) or tool calls to run before asking again. */
+export type ChatTurn = { text: string; toolCalls: ToolCall[] };
+
 export interface LlmProvider {
   readonly name: string;
   generateWorkflow(req: GenerateWorkflowRequest): Promise<GeneratedWorkflow>;
-  // Step 7 adds: chatWithTools(...) for the help desk agent.
+  chatWithTools(req: ChatRequest): Promise<ChatTurn>;
 }
 
 export class LlmError extends Error {}

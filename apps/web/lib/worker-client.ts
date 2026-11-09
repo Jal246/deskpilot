@@ -31,3 +31,12 @@ export type DirectoryResponse = {
 };
 
 export type CheckResponse = { ok: true } | { ok: false; codeProblems: string[]; schemaProblems: string[] };
+
+export type ChatEvent =
+  | { type: "workflow"; workflowName: string; status: "succeeded" | "failed" | "timed_out" | "refused"; runId?: string }
+  | { type: "kb"; titles: string[] }
+  | { type: "ticket"; ticketId: string; title: string };
+
+export type ChatResponse =
+  | { ok: true; reply: string; events: ChatEvent[] }
+  | { ok: false; code: string; message: string };

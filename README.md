@@ -64,6 +64,26 @@ Database:
 
 The editor loads Monaco from the jsDelivr CDN on first use (free, needs internet).
 
+## The help desk chat
+
+Sign in as **Eli Employee** (or open **Help desk chat** as an admin). The agent (`apps/worker/src/agent`) is a
+small tool-use loop: ask the model → run the tools it picks → hand back the results → repeat (max 4 rounds).
+
+| Tool | What it does |
+|---|---|
+| `wf_<slug>` | one per **published** workflow; runs it with `trigger = helpdesk` |
+| `search_kb` | Postgres full-text search over the knowledge base |
+| `create_ticket` | opens a ticket (visible on the **Tickets** page) |
+
+Rules enforced in code (and tested in `agent/helpdesk.test.ts`), not just in the prompt:
+- Only published workflows become tools, and `runWorkflow` re-checks "published" and uses `current_version_id` when it runs.
+- **Own account only:** any `email` input must be the employee's own email (missing → filled in, someone else's → refused).
+- Who is asking comes from the login session; the browser only sends plain chat text (no tool messages).
+- The agent asks "Shall I go ahead?" before running a workflow (the mock does this too).
+
+The mock model (`packages/llm/src/mock/helpdesk.ts`): request matches a published workflow → confirm → run;
+question → `search_kb`; nothing found or anything else → `create_ticket`.
+
 ## How a workflow runs
 
 1. Admin clicks **Run test** on a workflow page → web calls the worker (`POST /workflows/:id/test-run`, needs `WORKER_SECRET`).

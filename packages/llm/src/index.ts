@@ -5,6 +5,7 @@ import { LlmError, type LlmProvider } from "./types";
 
 export * from "./types";
 export { BUILDER_SYSTEM_PROMPT } from "./prompts/builder";
+export { helpdeskSystemPrompt } from "./prompts/helpdesk";
 export { MockProvider, pickTemplate } from "./mock/provider";
 export { TEMPLATES } from "./mock/templates";
 

@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { MockDirectoryStore } from "@deskpilot/sdk";
+import { helpdeskChat, validateHistory } from "./agent/helpdesk";
 import { checkWorkflow } from "./runner/check-workflow";
 import { runWorkflow } from "./runner/run-workflow";
 
@@ -57,6 +58,23 @@ app.post("/workflows/:id/test-run", async (c) => {
     { directory },
   );
   if (!result.ok) return c.json(result, result.code === "not_found" ? 404 : 422);
+  return c.json(result);
+});
+
+/** Help desk chat. The web app passes who is asking; the agent may only run published workflows. */
+app.post("/chat", async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { orgId?: unknown; userId?: unknown; messages?: unknown } | null;
+  if (!body || typeof body.orgId !== "string" || !UUID.test(body.orgId) || typeof body.userId !== "string" || !UUID.test(body.userId)) {
+    return c.json({ ok: false, code: "bad_request", message: "orgId and userId are required" }, 400);
+  }
+  const problem = validateHistory(body.messages);
+  if (problem) return c.json({ ok: false, code: "bad_request", message: problem }, 400);
+
+  const result = await helpdeskChat(
+    { orgId: body.orgId, userId: body.userId, messages: body.messages as Parameters<typeof helpdeskChat>[0]["messages"] },
+    { directory },
+  );
+  if (!result.ok) return c.json(result, result.code === "not_found" ? 404 : 400);
   return c.json(result);
 });
 
