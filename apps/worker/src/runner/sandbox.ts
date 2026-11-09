@@ -14,6 +14,8 @@ export type SandboxOptions = {
   callHost: (method: string, argsJson: string) => Promise<string>;
   timeoutMs?: number;
   memoryMb?: number;
+  /** Most sdk calls one run may make. */
+  maxHostCalls?: number;
 };
 
 export type SandboxResult =
@@ -22,6 +24,29 @@ export type SandboxResult =
 
 export const DEFAULT_TIMEOUT_MS = 10_000;
 export const DEFAULT_MEMORY_MB = 64;
+export const DEFAULT_MAX_HOST_CALLS = 500;
+/** Biggest result a workflow may return (as JSON text). Results are stored in the database. */
+export const MAX_OUTPUT_CHARS = 100_000;
+/** Sandboxes running at the same time; the rest wait their turn (each one can use 64 MB). */
+export const MAX_CONCURRENT_RUNS = 4;
+
+// ---------- a tiny semaphore so a burst of runs can't eat all the memory ----------
+let activeRuns = 0;
+const waiting: Array<() => void> = [];
+async function acquireSlot() {
+  if (activeRuns < MAX_CONCURRENT_RUNS) {
+    activeRuns++;
+    return;
+  }
+  await new Promise<void>((resolve) => waiting.push(resolve)); // the slot is handed over by releaseSlot
+}
+function releaseSlot() {
+  const next = waiting.shift();
+  if (next) next();
+  else activeRuns--;
+}
+/** For tests: how many sandboxes are running / waiting right now. */
+export const sandboxLoad = () => ({ active: activeRuns, waiting: waiting.length });
 
 // Runs inside the isolate. Builds the `sdk` object from the two references, then
 // hides them so workflow code can't reach them directly.
@@ -51,9 +76,21 @@ globalThis.__sdk = Object.freeze({
 })();`;
 
 class WallClockTimeout extends Error {}
+class OutputTooLarge extends Error {}
 
 export async function runInSandbox(opts: SandboxOptions): Promise<SandboxResult> {
+  await acquireSlot();
+  try {
+    return await runIsolated(opts);
+  } finally {
+    releaseSlot();
+  }
+}
+
+async function runIsolated(opts: SandboxOptions): Promise<SandboxResult> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const maxHostCalls = opts.maxHostCalls ?? DEFAULT_MAX_HOST_CALLS;
+  let hostCalls = 0;
   const isolate = new ivm.Isolate({ memoryLimit: opts.memoryMb ?? DEFAULT_MEMORY_MB });
   let timer: NodeJS.Timeout | undefined;
 
@@ -70,7 +107,10 @@ export async function runInSandbox(opts: SandboxOptions): Promise<SandboxResult>
     );
     await jail.set(
       "__host",
-      new ivm.Reference(async (method: string, argsJson: string) => opts.callHost(String(method), String(argsJson))),
+      new ivm.Reference(async (method: string, argsJson: string) => {
+        if (++hostCalls > maxHostCalls) throw new Error(`Too many sdk calls (limit ${maxHostCalls} per run)`);
+        return opts.callHost(String(method), String(argsJson));
+      }),
     );
 
     const execute = async () => {
@@ -91,7 +131,9 @@ export async function runInSandbox(opts: SandboxOptions): Promise<SandboxResult>
         timeout: timeoutMs,
         result: { promise: true },
       });
-      return JSON.parse(String(outJson)) as unknown;
+      const text = String(outJson);
+      if (text.length > MAX_OUTPUT_CHARS) throw new OutputTooLarge();
+      return JSON.parse(text) as unknown;
     };
 
     const wallClock = new Promise<never>((_, reject) => {
@@ -110,6 +152,9 @@ export async function runInSandbox(opts: SandboxOptions): Promise<SandboxResult>
 }
 
 function classify(err: unknown, timeoutMs: number): SandboxResult {
+  if (err instanceof OutputTooLarge) {
+    return { status: "failed", error: `The workflow returned too much data (limit ${MAX_OUTPUT_CHARS / 1000} KB). Return a short summary instead.` };
+  }
   const message = err instanceof Error ? err.message : String(err);
   if (err instanceof WallClockTimeout || /timed out/i.test(message)) {
     return { status: "timed_out", error: `Stopped after ${timeoutMs / 1000}s (time limit)` };

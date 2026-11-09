@@ -2,11 +2,11 @@
 // give it the results → repeat, at most MAX_TURNS times. All the safety rules live in the
 // tools (tools.ts) and runWorkflow, not in the prompt.
 import { db, eq, organizations, users, and } from "@deskpilot/db";
-import { getLlm, helpdeskSystemPrompt, type ChatMessage } from "@deskpilot/llm";
+import { getLlm, helpdeskSystemPrompt, type ChatMessage, type LlmProvider } from "@deskpilot/llm";
 import type { HostDeps } from "@deskpilot/sdk";
 import { loadToolbox, type AgentEvent } from "./tools";
 
-const MAX_TURNS = 4;
+export const MAX_TURNS = 4;
 const MAX_TOOL_CALLS_PER_TURN = 3;
 export const MAX_HISTORY = 30;
 export const MAX_MESSAGE_CHARS = 4_000;
@@ -21,6 +21,7 @@ export type HelpdeskReply =
 export async function helpdeskChat(
   req: { orgId: string; userId: string; messages: HistoryMessage[] },
   deps: HostDeps,
+  llm: LlmProvider = getLlm(),
 ): Promise<HelpdeskReply> {
   const [row] = await db
     .select({ id: users.id, name: users.name, email: users.email, orgName: organizations.name })
@@ -31,7 +32,6 @@ export async function helpdeskChat(
 
   const user = { id: row.id, name: row.name, email: row.email };
   const toolbox = await loadToolbox({ orgId: req.orgId, user, deps });
-  const llm = getLlm();
   const system = helpdeskSystemPrompt(user, row.orgName);
 
   const messages: ChatMessage[] = req.messages.slice(-MAX_HISTORY).map((m) => ({ role: m.role, content: m.content }));

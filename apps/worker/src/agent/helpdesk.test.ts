@@ -14,9 +14,9 @@ import {
   workflows,
   workflowVersions,
 } from "@deskpilot/db";
-import { TEMPLATES } from "@deskpilot/llm";
+import { TEMPLATES, type LlmProvider } from "@deskpilot/llm";
 import { MockDirectoryStore } from "@deskpilot/sdk";
-import { helpdeskChat, validateHistory, type HistoryMessage } from "./helpdesk";
+import { helpdeskChat, MAX_TURNS, validateHistory, type HistoryMessage } from "./helpdesk";
 import { loadToolbox } from "./tools";
 
 const directory = new MockDirectoryStore();
@@ -155,6 +155,36 @@ describe("help desk agent", () => {
       .from(tickets)
       .where(and(eq(tickets.orgId, orgId), eq(tickets.title, "Please add me to the design group")));
     expect(row).toMatchObject({ requesterId: employee.id, status: "open", source: "web" });
+  });
+});
+
+describe("help desk agent: a misbehaving model (step 8 hardening)", () => {
+  // A model that never stops asking for tools.
+  const loopingModel = (callsPerTurn: number): LlmProvider => ({
+    name: "looping",
+    generateWorkflow: async () => {
+      throw new Error("unused");
+    },
+    chatWithTools: async () => ({
+      text: "",
+      toolCalls: Array.from({ length: callsPerTurn }, (_, i) => ({ id: `c${i}`, name: "search_kb", input: { query: "vpn" } })),
+    }),
+  });
+
+  it("stops after MAX_TURNS rounds and says so", async () => {
+    const res = await helpdeskChat({ orgId, userId: employee.id, messages: [{ role: "user", content: "hi" }] }, deps, loopingModel(1));
+    expect(res.ok && res.events).toHaveLength(MAX_TURNS);
+    expect(res.ok && res.reply).toMatch(/got stuck/);
+  });
+
+  it("runs at most 3 tool calls per round", async () => {
+    const res = await helpdeskChat({ orgId, userId: employee.id, messages: [{ role: "user", content: "hi" }] }, deps, loopingModel(50));
+    expect(res.ok && res.events).toHaveLength(MAX_TURNS * 3);
+  });
+
+  it("can't act for a user from another org", async () => {
+    const res = await helpdeskChat({ orgId: crypto.randomUUID(), userId: employee.id, messages: [{ role: "user", content: "hi" }] }, deps);
+    expect(res).toMatchObject({ ok: false, code: "not_found" });
   });
 });
 

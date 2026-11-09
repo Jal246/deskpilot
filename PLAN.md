@@ -163,7 +163,7 @@ export default async function run(input: { email: string; group: string }, sdk: 
 | 5 ✅ | LLM package (mock provider) + builder: prompt box → generated code + schema → Monaco → save version | type "reset a user's password", get code |
 | 6 ✅ | Test run + publish in the editor: auto-built input form from schema, live logs, Publish | full admin loop: describe → test → publish |
 | 7 ✅ | Help desk chat: agent with published workflows as tools + `search_kb` + `create_ticket` | as employee: "I'm locked out" → it runs reset-password; "my monitor is broken" → ticket |
-| 8 | Hardening + README: timeouts/memory tests, nasty-code tests (infinite loop, `process`, imports), demo script | run the full demo from README |
+| 8 ✅ | Hardening + README: timeouts/memory tests, nasty-code tests (infinite loop, `process`, imports), demo script | run the full demo from README |
 
 Safety tests in step 4/7 (written as small automated tests):
 - infinite loop → `timed_out`, worker stays alive

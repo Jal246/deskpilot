@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { callHost, MockDirectoryStore } from "@deskpilot/sdk";
 import { compileWorkflow } from "./compile";
-import { runInSandbox, type LogLevel } from "./sandbox";
+import { MAX_CONCURRENT_RUNS, MAX_OUTPUT_CHARS, runInSandbox, sandboxLoad, type LogLevel } from "./sandbox";
 
 const directory = new MockDirectoryStore();
 beforeEach(() => directory.reset());
@@ -93,7 +93,8 @@ describe("sandbox: safety", () => {
 
   it("stops a loop between awaits", async () => {
     const { result } = await run(
-      `export default async (i: unknown, sdk: Sdk) => { for (;;) { await sdk.mockDirectory.listGroups(); } }`,
+      // Keeps going even after the sdk-call cap starts refusing, so only the time limit can stop it.
+      `export default async (i: unknown, sdk: Sdk) => { for (;;) { try { await sdk.mockDirectory.listGroups(); } catch {} } }`,
       {},
       { timeoutMs: 500 },
     );
@@ -135,5 +136,64 @@ describe("sandbox: safety", () => {
   it("rejects host calls to methods that aren't on the list", async () => {
     await expect(callHost({ directory }, "fs.readFile", "[]")).rejects.toThrow(/Unknown sdk method/);
     await expect(callHost({ directory }, "mockDirectory.addUserToGroup", "[1, {}]")).rejects.toThrow(/must be/);
+  });
+});
+
+describe("sandbox: limits (step 8 hardening)", () => {
+  it("refuses a result that's too big to store", async () => {
+    const { result } = await run(`export default async () => "x".repeat(${MAX_OUTPUT_CHARS + 10})`);
+    expect(result.status).toBe("failed");
+    expect(result.status !== "succeeded" && result.error).toMatch(/too much data/);
+  });
+
+  it("caps the number of sdk calls per run", async () => {
+    const { result } = await run(
+      `export default async (i: unknown, sdk: Sdk) => { for (let n = 0; n < 10_000; n++) await sdk.mockDirectory.listGroups(); }`,
+      {},
+      { timeoutMs: 5_000 },
+    );
+    expect(result.status).toBe("failed");
+    expect(result.status !== "succeeded" && result.error).toMatch(/Too many sdk calls/);
+  });
+
+  it("fails cleanly on a result that isn't JSON (BigInt)", async () => {
+    const { result } = await run(`export default async () => ({ n: BigInt(1) })`);
+    expect(result.status).toBe("failed");
+  });
+
+  it("survives endless recursion (stack overflow)", async () => {
+    const { result } = await run(`const f = (n: number): number => f(n + 1) + 1;
+export default async () => f(0);`);
+    expect(result.status).toBe("failed");
+    const after = await run(`export default async () => "ok"`);
+    expect(after.result).toEqual({ status: "succeeded", output: "ok" });
+  });
+
+  it("can't change the sdk object", async () => {
+    const { result } = await run(
+      `export default async (i: unknown, sdk: any) => {
+        try { sdk.mockDirectory.resetPassword = () => "hacked"; } catch {}
+        try { sdk.extra = 1; } catch {}
+        return [Object.isFrozen(sdk), Object.isFrozen(sdk.mockDirectory), sdk.extra === undefined];
+      }`,
+    );
+    expect(result).toEqual({ status: "succeeded", output: [true, true, true] });
+  });
+
+  it("rejects oversized sdk arguments on the host side", async () => {
+    const { result } = await run(
+      `export default async (i: unknown, sdk: Sdk) => sdk.mockDirectory.getUser("a".repeat(100_000))`,
+    );
+    expect(result.status).toBe("failed");
+    expect(result.status !== "succeeded" && result.error).toMatch(/must be a non-empty string/);
+  });
+
+  it("runs at most MAX_CONCURRENT_RUNS sandboxes at once; the rest queue", async () => {
+    const busy = `export default async () => { const end = Date.now() + 150; while (Date.now() < end) {} return "done"; }`;
+    const runs = Array.from({ length: MAX_CONCURRENT_RUNS + 2 }, () => run(busy));
+    expect(sandboxLoad()).toEqual({ active: MAX_CONCURRENT_RUNS, waiting: 2 });
+    const results = await Promise.all(runs);
+    expect(results.every((r) => r.result.status === "succeeded")).toBe(true);
+    expect(sandboxLoad()).toEqual({ active: 0, waiting: 0 });
   });
 });
