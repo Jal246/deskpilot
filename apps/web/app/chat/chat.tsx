@@ -20,7 +20,11 @@ export function Chat({ firstName, isStaff }: { firstName: string; isStaff: boole
   const [pending, startTransition] = useTransition();
   const bottom = useRef<HTMLDivElement>(null);
 
-  useEffect(() => bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" }), [messages, pending]);
+  // Braces matter: an effect may only return a cleanup function, and newer browsers make
+  // scrollIntoView() return a Promise ("destroy is not a function" otherwise).
+  useEffect(() => {
+    bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages, pending]);
 
   const send = (text: string) => {
     const content = text.trim();
